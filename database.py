@@ -224,6 +224,7 @@ class Database:
 
 
     def table_to_csv(self, table_name, filename=None):
+        self.installation_for_flags()
         self._calculate(1,"table to csv",table_name,time.time())
         res = ''
         for row in [self.tables[table_name].column_names]+self.tables[table_name].data:
