@@ -1,23 +1,32 @@
 from __future__ import annotations
 import pickle
 from table import Table
-from time import sleep, localtime, strftime
+import time
 import os
 from btree import Btree
 import shutil
 from misc import split_condition
+from project import EfficiencyCalculate
 
 class Database:
     '''
     Database class contains tables.
     '''
+    global check,timer,check_meta,in_start_flag,in_stop_flag,L,in_start_flag_meta , in_stop_flag_meta ,L_meta
+    L_meta=[]
+    L=[]
+    timer=None
+    check=False
+    check_meta=False
+    in_start_flag=False
+    in_stop_flag=False
+    in_start_flag_meta=False
+    in_stop_flag_meta=False
 
     def __init__(self, name, load=True):
         self.tables = {}
         self._name = name
-
         self.savedir = f'dbdata/{name}_db'
-
         if load:
             try:
                 self.load(self.savedir)
@@ -43,15 +52,43 @@ class Database:
         self.create_table('meta_indexes',  ['table_name', 'index_name'], [str, str])
         self.save()
 
+   
+    def Check_flags(self,letter):
+        global L,L_meta
+        if(letter=='a'):
+            if(in_start_flag==True and in_stop_flag==False):
+                L.insert(0,time.time())
+            elif(in_start_flag==False and in_stop_flag==True):
+                if(len(L)!=0):
+                    x=L.pop(-1)
+                    L=[]
+                    return x
+        elif(letter=='m'):
+            if(in_start_flag_meta==True and in_stop_flag_meta==False):
+                L_meta.insert(0,time.time())
+            elif(in_start_flag_meta==False and in_stop_flag_meta==True):
+                if(len(L_meta)!=0):
+                    x=L_meta.pop(-1)
+                    L_meta=[]
+                    return x
 
+    def installation_for_flags(self):
+        global in_start_flag,in_start_flag_meta,in_stop_flag,in_stop_flag_meta,L_meta,L
+        in_start_flag=False
+        in_stop_flag = False
+        in_start_flag_meta = False
+        in_stop_flag_meta =False
 
     def save(self):
         '''
         Save db as a pkl file. This method saves the db object, ie all the tables and attributes.
         '''
+        self.installation_for_flags()
+        self._calculate(1,"save table"," ",time.time())
         for name, table in self.tables.items():
             with open(f'{self.savedir}/{name}.pkl', 'wb') as f:
                 pickle.dump(table, f)
+        self._calculate(2,"save table",self._name,time.time())
 
     def _save_locks(self):
         '''
@@ -59,11 +96,12 @@ class Database:
         '''
         with open(f'{self.savedir}/meta_locks.pkl', 'wb') as f:
             pickle.dump(self.tables['meta_locks'], f)
-
     def load(self, path):
         '''
         Load all the tables that are part of the db (indexs are noted loaded here)
         '''
+        self.installation_for_flags()
+        self._calculate(1,"load",path,time.time())
         for file in os.listdir(path):
 
             if file[-3:]!='pkl': # if used to load only pkl files
@@ -74,9 +112,13 @@ class Database:
             name = f'{file.split(".")[0]}'
             self.tables.update({name: tmp_dict})
             setattr(self, name, self.tables[name])
+        self._calculate(2,"load",path,time.time())
 
     def drop_db(self):
+        self.installation_for_flags()
+        self._calculate(1,"drop",self._name,time.time())
         shutil.rmtree(self.savedir)
+        self._calculate(2,"drop",self._name,time.time())
 
     #### IO ####
 
@@ -88,7 +130,19 @@ class Database:
         self._update_meta_locks()
         self._update_meta_insert_stack()
 
-
+    def enable_calculate(self):
+        global check,check_meta,timer
+        check=True
+        timer=EfficiencyCalculate()
+        print("efficienty calculate is on")
+        check_meta=timer.Ask_User()
+    
+    def disable_calculate(self):
+        global check,check_meta
+        check=False
+        check_meta=False
+        print("efficienty calculate is off")
+    
     def create_table(self, name=None, column_names=None, column_types=None, primary_key=None, load=None):
         '''
         This method create a new table. This table is saved and can be accessed by
@@ -96,6 +150,8 @@ class Database:
         or
         db_object.table_name
         '''
+        self.installation_for_flags()
+        self._calculate(1,"create table",self._name,time.time())
         self.tables.update({name: Table(name=name, column_names=column_names, column_types=column_types, primary_key=primary_key, load=load)})
         # self._name = Table(name=name, column_names=column_names, column_types=column_types, load=load)
         # check that new dynamic var doesnt exist already
@@ -107,12 +163,15 @@ class Database:
         print(f'New table "{name}"')
         self._update()
         self.save()
+        self._calculate(2,"create table",self._name,time.time())
 
 
     def drop_table(self, table_name):
         '''
         Drop table with name 'table_name' from current db
         '''
+        self.installation_for_flags()
+        self._calculate(1,"drop table",table_name,time.time())
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
@@ -129,6 +188,7 @@ class Database:
 
         # self._update()
         self.save()
+        self._calculate(2,"drop table",table_name,time.time())
 
 
     def table_from_csv(self, filename, name=None, column_types=None, primary_key=None):
@@ -137,6 +197,8 @@ class Database:
         If name is not specified, filename's name is used
         If column types are not specified, all are regarded to be of type str
         '''
+        self.installation_for_flags()
+        self._calculate(1,"table from csv",filename,time.time())
         if name is None:
             name=filename.split('.')[:-1][0]
 
@@ -158,9 +220,11 @@ class Database:
         self.unlock_table(name)
         self._update()
         self.save()
+        self._calculate(2,"table from csv",filename,time.time())
 
 
     def table_to_csv(self, table_name, filename=None):
+        self._calculate(1,"table to csv",table_name,time.time())
         res = ''
         for row in [self.tables[table_name].column_names]+self.tables[table_name].data:
             res+=str(row)[1:-1].replace('\'', '').replace('"','').replace(' ','')+'\n'
@@ -170,12 +234,12 @@ class Database:
 
         with open(filename, 'w') as file:
            file.write(res)
+        self._calculate(2,"table to csv",table_name,time.time())
 
     def table_from_object(self, new_table):
         '''
         Add table obj to database.
         '''
-
         self.tables.update({new_table._name: new_table})
         if new_table._name not in self.__dir__():
             setattr(self, new_table._name, new_table)
@@ -205,6 +269,8 @@ class Database:
         column_name -> the column that will be casted (needs to exist in table)
         cast_type -> needs to be a python type like str int etc. NOT in ''
         '''
+        self.installation_for_flags()
+        self._calculate(1,"cast column",table_name,time.time())
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
@@ -213,6 +279,7 @@ class Database:
         self.unlock_table(table_name)
         self._update()
         self.save()
+        self._calculate(2,"cast column",table_name,time.time())
 
     def insert(self, table_name, row, lock_load_save=True):
         '''
@@ -222,6 +289,8 @@ class Database:
         row -> a list of the values that are going to be inserted (will be automatically casted to predifined type)
         lock_load_save -> If false, user need to load, lock and save the states of the database (CAUTION). Usefull for bulk loading
         '''
+        self.installation_for_flags()
+        self._calculate(1,"insert",table_name,time.time())
         if lock_load_save:
             self.load(self.savedir)
             if self.is_locked(table_name):
@@ -241,6 +310,7 @@ class Database:
             self.unlock_table(table_name)
             self._update()
             self.save()
+        self._calculate(2,"insert",table_name,time.time())
 
 
     def update(self, table_name, set_value, set_column, condition):
@@ -256,6 +326,8 @@ class Database:
 
                     operatores supported -> (<,<=,==,>=,>)
         '''
+        self.installation_for_flags()
+        self._calculate(1,"update",table_name,time.time())
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
@@ -264,6 +336,7 @@ class Database:
         self.unlock_table(table_name)
         self._update()
         self.save()
+        self._calculate(2,"update",table_name,time.time())
 
     def delete(self, table_name, condition):
         '''
@@ -276,6 +349,8 @@ class Database:
 
                     operatores supported -> (<,<=,==,>=,>)
         '''
+        self.installation_for_flags()
+        self._calculate(1,"delete",table_name,time.time())
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
@@ -288,6 +363,7 @@ class Database:
         if table_name[:4]!='meta':
             self._add_to_insert_stack(table_name, deleted)
         self.save()
+        self._calculate(2,"delete",table_name,time.time())
 
     def select(self, table_name, columns, condition=None, order_by=None, asc=False,\
                top_k=None, save_as=None, return_object=False):
@@ -308,6 +384,8 @@ class Database:
         return_object -> If true, the result will be a table object (usefull for internal usage). Def: False (the result will be printed)
 
         '''
+        self.installation_for_flags()
+        self._calculate(1,"select",table_name,time.time())
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
@@ -329,6 +407,7 @@ class Database:
                 return table
             else:
                 table.show()
+        self._calculate(2,"select",table_name,time.time())
 
     def show_table(self, table_name, no_of_rows=None):
         '''
@@ -349,7 +428,6 @@ class Database:
         column_name -> the column that will be used to sort
         asc -> If True sort will return results using an ascending order. Def: False
         '''
-
         self.load(self.savedir)
         if self.is_locked(table_name):
             return
@@ -372,6 +450,8 @@ class Database:
         save_as -> The name that will be used to save the resulting table in the database. Def: None (no save)
         return_object -> If true, the result will be a table object (usefull for internal usage). Def: False (the result will be printed)
         '''
+        self.installation_for_flags()
+        self._calculate(1,"inner join",left_table_name+"|><|"+right_table_name,time.time())
         self.load(self.savedir)
         if self.is_locked(left_table_name) or self.is_locked(right_table_name):
             print(f'Table/Tables are currently locked')
@@ -386,6 +466,7 @@ class Database:
                 return res
             else:
                 res.show()
+        self._calculate(2,"inner join",left_table_name+"|><|"+right_table_name,time.time())
 
     def lockX_table(self, table_name):
         '''
@@ -393,12 +474,15 @@ class Database:
 
         table_name -> table's name (needs to exist in database)
         '''
+        self.installation_for_flags()
+        self._calculate(1,"lock table",table_name,time.time())
         if table_name[:4]=='meta':
             return
 
         self.tables['meta_locks']._update_row(True, 'locked', f'table_name=={table_name}')
         self._save_locks()
         # print(f'Locking table "{table_name}"')
+        self._calculate(2,"lock table",table_name,time.time())
 
     def unlock_table(self, table_name):
         '''
@@ -437,11 +521,63 @@ class Database:
     # The following functions are used to update, alter, load and save the meta tables.
     # Important: Meta tables contain info regarding the NON meta tables ONLY.
     # i.e. meta_length will not show the number of rows in meta_locks etc.
+    def _calculate_start(self):
+        global check,timer
+        if(check):
+            timer.start_calculate_time()
+    
 
+    def _calculate_stop(self,method_name,table_name,timee,char):
+        global check,timer
+        if(check):
+            if(char=='a'):
+                timer.end_calculate_time(method_name,table_name,timee,'a')
+            else:
+                timer.end_calculate_time(method_name,table_name,timee,'m')
+
+
+    def _calculate(self,int_number,method_name,table_name,timee):
+        global check,in_start_flag,in_stop_flag
+        checked_flag=False
+        if(in_start_flag==True and in_stop_flag==True):
+            in_start_flag=False
+            in_stop_flag=False
+        if(check):
+            if(int_number==1):
+                in_start_flag=True
+                self._calculate_start()
+            elif(int_number==2):
+                in_stop_flag= True
+                temp=self.Check_flags("a")
+                checked_flag=True
+                self._calculate_stop(method_name,table_name,temp,"a")
+            if(not(checked_flag)):
+                self.Check_flags("a")
+    
+    def _meta_calculate(self,int_number,method_name,table_name,timee):
+        global check_meta,in_start_flag_meta,in_stop_flag_meta
+        checked_flag_meta=False
+        if(in_start_flag_meta==True and in_stop_flag_meta==True):
+            in_start_flag_meta=False
+            in_stop_flag_meta=False
+        if(check_meta):
+            if(int_number==1):
+                in_start_flag_meta=True
+                self._calculate_start()
+            elif(int_number==2):
+                in_stop_flag_meta= True
+                temp=self.Check_flags('m')
+                checked_flag_meta=True
+                self._calculate_stop(method_name,table_name,temp,"m")
+            if(not(checked_flag_meta)):
+                self.Check_flags('m')
+       
     def _update_meta_length(self):
         '''
         updates the meta_length table.
         '''
+        self.installation_for_flags()
+        self._meta_calculate(1,"update meta length"," ",time.time())
         for table in self.tables.values():
             if table._name[:4]=='meta': #skip meta tables
                 continue
@@ -453,11 +589,14 @@ class Database:
             non_none_rows = len([row for row in table.data if any(row)])
             self.tables['meta_length']._update_row(non_none_rows, 'no_of_rows', f'table_name=={table._name}')
             # self.update_row('meta_length', len(table.data), 'no_of_rows', 'table_name', '==', table._name)
+        self._meta_calculate(2,"update meta length"," ",time.time())
 
     def _update_meta_locks(self):
         '''
         updates the meta_locks table
         '''
+        self.installation_for_flags()
+        self._meta_calculate(1,"update meta locks"," ",time.time())
         for table in self.tables.values():
             if table._name[:4]=='meta': #skip meta tables
                 continue
@@ -465,16 +604,20 @@ class Database:
 
                 self.tables['meta_locks']._insert([table._name, False])
                 # self.insert('meta_locks', [table._name, False])
+        self._meta_calculate(2,"update meta locks"," ",time.time())
 
     def _update_meta_insert_stack(self):
         '''
         updates the meta_insert_stack table
         '''
+        self.installation_for_flags()
+        self._meta_calculate(1,"update meta insert stack"," ",time.time())
         for table in self.tables.values():
             if table._name[:4]=='meta': #skip meta tables
                 continue
             if table._name not in self.meta_insert_stack.table_name:
                 self.tables['meta_insert_stack']._insert([table._name, []])
+        self._meta_calculate(2,"update meta insert stack"," ",time.time())
 
 
     def _add_to_insert_stack(self, table_name, indexes):
@@ -516,6 +659,8 @@ class Database:
         table_name -> table's name (needs to exist in database)
         index_name -> name of the created index
         '''
+        self.installation_for_flags()
+        self._calculate(1,"create index",table_name,time.time())
         if self.tables[table_name].pk_idx is None: # if no primary key, no index
             print('## ERROR - Cant create index. Table has no primary key.')
             return
@@ -531,6 +676,7 @@ class Database:
         else:
             print('## ERROR - Cant create index. Another index with the same name already exists.')
             return
+        self._calculate(2,"create index",table_name,time.time())
 
     def _construct_index(self, table_name, index_name):
         '''
